@@ -4,6 +4,9 @@ Base settings to build other settings files upon.
 from pathlib import Path
 
 import environ
+from corsheaders.defaults import default_headers
+
+# from corsheaders.defaults import default_headers
 
 ROOT_DIR = Path(__file__).resolve(strict=True).parent.parent.parent
 # channel_plugin/
@@ -109,9 +112,9 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "channel_plugin.utils.middleware.CorsMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -305,4 +308,8 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 
 # CORS_ALLOW_ALL_ORIGINS = True
 
-CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "authorization",
+]

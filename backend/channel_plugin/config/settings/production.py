@@ -15,7 +15,7 @@ sentry_logging = LoggingIntegration(
 )
 
 sentry_sdk.init(
-    dsn="https://134b2852b51c479db3fe6aa4de6c9ce1@o1010351.ingest.sentry.io/5974834",
+    dsn="https://bac01ed6c24d4387ab23ebb41cccd801@o1040765.ingest.sentry.io/6009763",
     integrations=[sentry_logging, DjangoIntegration()],
     # Set traces_sample_rate to 1.0 to capture 100%
     # of transactions for performance monitoring.
@@ -77,16 +77,6 @@ SECURE_CONTENT_TYPE_NOSNIFF = env.bool(
 # CORS_ALLOW_ALL_ORIGINS = True
 # CORS_ORIGIN_ALLOW_ALL = True
 # CORS_ORIGIN_ALLOW = True
-
-# CORS_ALLOWED_ORIGINS = [
-#    "http://localhost:3001",
-# ]
-
-# CORS_ALLOWED_ORIGIN_REGEXES = [
-#     r"^https://\w+\.zuri\.chat$",
-#     r"^http://localhost:[\d+]{4}",
-#     r"^http://127.0.0.1:[\d+]{4}",
-# ]
 
 # STATIC
 # ------------------------

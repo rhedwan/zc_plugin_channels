@@ -9,12 +9,11 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from sentry_sdk import capture_message
 
 from channel_plugin.utils.custome_response import Response as Custom_Response
-from channel_plugin.utils.customrequest import AsyncRequest, Request
+from channel_plugin.utils.customrequest import AsyncRequest, unread
 from channel_plugin.utils.mixins import AsycViewMixin
 
 from .serializers import InstallSerializer
@@ -33,20 +32,22 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
         methods=["GET"],
         detail=False,
     )
-    def ping(self, request):
+    async def ping(self, request):
         """Get server status
 
         ```bash
         curl -X GET "{{baseUrl}}/v1/ping" -H  "accept: application/json"
         ```
         """
-        return Response({"success": True}, status=status.HTTP_200_OK)
+        return Custom_Response(
+            {"success": True}, status=status.HTTP_200_OK, view=self, request=request
+        )
 
     @action(
         methods=["GET"],
         detail=False,
     )
-    def info(self, request):
+    async def info(self, request):
         """Get plugin details and developer information
 
         ```bash
@@ -70,7 +71,9 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
             },
             "success": True,
         }
-        return Response(data, status=status.HTTP_200_OK)
+        return Custom_Response(
+            data, status=status.HTTP_200_OK, request=request, view=self
+        )
 
     @swagger_auto_schema(
         manual_parameters=[
@@ -98,7 +101,7 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
         ]
     )
     @action(methods=["GET"], detail=False, url_path="sidebar")
-    def info_sidebar(self, request):
+    async def info_sidebar(self, request):
         """Get dynamic sidebar details for a user in an organisation
 
         ```bash
@@ -106,19 +109,20 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
         ```
         """
         org_id = request.query_params.get("org")
-        member_id = request.query_params.get("user")
+        user_id = request.query_params.get("user")
+        joined_rooms = list()
+        public_rooms = list()
+        starred_rooms = list()
 
         data = {
             "name": "Channels Plugin",
             "description": description,
-            "button_url": "/channels",
             "plugin_id": settings.PLUGIN_ID,
-            "category": "channels",
         }
-        if org_id is not None and member_id is not None:
-            channels = Request.get(org_id, "channel")
-            joined_rooms = list()
-            public_rooms = list()
+        if org_id is not None and user_id is not None:
+
+            channels = await AsyncRequest.get(org_id, "channel")
+
             if isinstance(channels, list):
                 joined_rooms = list(
                     map(
@@ -126,11 +130,31 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
                             "room_name": channel.get("slug"),
                             "room_url": f"/channels/message-board/{channel.get('_id')}",
                             "room_image": "",
+                            "unread": unread(org_id, channel.get("_id")),
                         },
                         list(
                             filter(
-                                lambda channel: member_id in channel["users"].keys()
-                                and not channel.get("default", False),
+                                lambda channel: user_id in channel["users"].keys()
+                                and not channel.get("default", False)
+                                and not channel["users"][user_id].get("starred", False),
+                                channels,
+                            )
+                        ),
+                    )
+                )
+                starred_rooms = list(
+                    map(
+                        lambda channel: {
+                            "room_name": channel.get("slug"),
+                            "room_url": f"/channels/message-board/{channel.get('_id')}",
+                            "room_image": "",
+                            "unread": unread(org_id, channel.get("_id")),
+                        },
+                        list(
+                            filter(
+                                lambda channel: user_id in channel["users"].keys()
+                                and not channel.get("default", False)
+                                and channel["users"][user_id].get("starred", False),
                                 channels,
                             )
                         ),
@@ -145,7 +169,7 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
                         },
                         list(
                             filter(
-                                lambda channel: member_id not in channel["users"].keys()
+                                lambda channel: user_id not in channel["users"].keys()
                                 and not channel.get("private")
                                 and not channel.get("default", False),
                                 channels,
@@ -153,70 +177,78 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
                         ),
                     )
                 )
-
-            data.update(
-                {
-                    "organisation_id": org_id,
-                    "user_id": member_id,
-                    "group_name": "Channel",
-                    "show_group": False,
-                    "category": "channels",
-                    "button_url": "/channels",
-                    "joined_rooms": joined_rooms,
-                    "public_rooms": public_rooms,
-                }
-            )
-
+        data.update(
+            {
+                "organisation_id": org_id,
+                "user_id": user_id,
+                "group_name": "Channel",
+                "show_group": False,
+                "category": "channels",
+                "button_url": "/channels",
+                "joined_rooms": joined_rooms,
+                "public_rooms": public_rooms,
+                "starred_rooms": starred_rooms,
+            }
+        )
         # AUTHENTICATION SHOULD COME SOMEWHERE HERE, BUT THAT's WHEN WE GET THE DB UP
 
-        return Response(data, status=status.HTTP_200_OK)
+        return Custom_Response(
+            data, status=status.HTTP_200_OK, request=request, view=self
+        )
 
     @action(methods=["GET"], detail=False, url_path="details")
-    def info_details(self, request):
+    async def info_details(self, request):
         date = timezone.now().isoformat()
         no_of_times = random.randint(11, 25) + random.randint(10, 20)
-        return Response(
+        return Custom_Response(
             data={
                 "message": "Welcome, to the Channels Plugin",
-                "last_visted": date,
-                "no_of_times_visted": no_of_times,
+                "last_visited": date,
+                "no_of_times_visited": no_of_times,
             },
             status=status.HTTP_200_OK,
+            request=request,
+            view=self,
         )
 
     @action(methods=["GET"], detail=False, url_path="collections/(?P<plugin_id>[^/.]+)")
-    def collections(self, request, plugin_id):
+    async def collections(self, request, plugin_id):
         """Get all database collections related to plugin
 
         ```bash
         curl -X GET "{{baseUrl}}/v1/collections/<plugin_id>" -H  "accept: application/json"
         ```
         """
-        response = (
-            requests.get(f"https://api.zuri.chat/data/collections/{plugin_id}").json()
-            or {}
-        )
-        return Response(response, status=status.HTTP_200_OK)
+        response = requests.get(f"https://api.zuri.chat/data/collections/{plugin_id}")
+        status_code = status.HTTP_404_NOT_FOUND
+        if response.status_code >= 200 and response.status_code < 300:
+            response = response.json()
+            status_code = status.HTTP_200_OK
+        return Custom_Response(response, status=status_code, view=self, request=request)
 
     @action(
         methods=["GET"],
         detail=False,
         url_path="collections/(?P<plugin_id>[^/.]+)/organizations/(?P<org_id>[^/.]+)",
     )
-    def collections_by_organization(self, request, org_id, plugin_id):
+    async def collections_by_organization(self, request, org_id, plugin_id):
         """Get all database collections related to plugin specific to an organisation
 
         ```bash
         curl -X GET "{{baseUrl}}/v1/collections/{{plugin_id}}/organizations/{{org_id}}" -H  "accept: application/json"
         ```
         """
-        response = (
-            requests.get(
-                f"https://api.zuri.chat/data/collections/{plugin_id}/{org_id}"
-            ).json()
-            or {}
+        response = requests.get(
+            f"https://api.zuri.chat/data/collections/{plugin_id}/{org_id}"
         )
-        return Response(response, status=status.HTTP_200_OK)
+
+        status_code = status.HTTP_404_NOT_FOUND
+
+        if response.status_code >= 200 and response.status_code < 300:
+            response = response.json()
+            status_code = status.HTTP_200_OK
+
+        return Custom_Response(response, status=status_code, view=self, request=request)
 
     @swagger_auto_schema(request_body=InstallSerializer)
     @action(
@@ -225,21 +257,22 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
         url_path="install",
     )
     async def install(self, request):
-        capture_message(f"Headers - {request.headers}", level="info")
-        capture_message(f"Request - {request.__dict__}", level="info")
+        good_message = ["plugin saved successfully", "plugin has already been added"]
         serializer = InstallSerializer(data=request.data)
         try:
             serializer.is_valid(raise_exception=True)
         except Exception as exc:
             return self.get_exception_response(exc, request)
 
-        org_id = serializer.data.get("org_id")
+        org_id = serializer.data.get("organization_id")
         user_id = serializer.data.get("user_id")
         title = serializer.data.get("title")
 
+        capture_message(f"auth {request.headers.get('authorization')}")
+
         headers = {
             "Content-Type": "application/json",
-            "Cookie": "f6822af94e29ba112be310d3af45d5c7=MTYzNDEyMDc3MHxHd3dBR0RZeE5UZzBNak5sT0RjMU5EQmtPR1F3TVdabVl6aGpNdz09fAS7LNmVpw4nBIe5afKc4Wx9Kqzr1AftKwLXz8_a59Dr",  # noqa
+            "Authorization": request.headers.get("authorization", ""),
         }
         url = f"https://api.zuri.chat/organizations/{org_id}/plugins"
         data = {
@@ -247,9 +280,10 @@ class GetInfoViewset(AsycViewMixin, ViewSet):
             "plugin_id": settings.PLUGIN_ID,
         }
         res = requests.post(url, data=json.dumps(data), headers=headers)
+        capture_message(f"Response of register - {res.json()}")
         if (
             res.status_code == 400
-            and "invalid" in res.json().get("message")
+            and res.json().get("message") not in good_message
             or res.status_code == 401
         ):
             return Custom_Response(

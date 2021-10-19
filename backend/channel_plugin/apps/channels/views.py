@@ -78,7 +78,7 @@ class ChannelViewset(AsycViewMixin, ThrottledViewSet, OrderMixin):
                     sender=None,
                     dispatch_uid="UpdateSidebarSignal",
                     org_id=org_id,
-                    member_id=result.get("owner"),
+                    user_id=result.get("owner"),
                 )
             )
             status_code = status.HTTP_201_CREATED
@@ -106,30 +106,33 @@ class ChannelViewset(AsycViewMixin, ThrottledViewSet, OrderMixin):
             return self.get_exception_response(exc, request)
 
         channel_serializer = serializer.convert_to_channel_serializer()
-        channel_serializer.is_valid(raise_exception=True)
-        channel = channel_serializer.data.get("channel")
-        result = await channel.create(serializer.data.get("org_id"))
         status_code = status.HTTP_404_NOT_FOUND
+        if channel_serializer.is_valid(raise_exception=False):
+            channel = channel_serializer.data.get("channel")
+            result = await channel.create(serializer.data.get("org_id"))
 
-        if result.__contains__("_id"):
-            loop = asyncio.get_event_loop()
-            loop.create_task(
-                request_finished.send(
-                    sender=str,
-                    dispatch_uid="UpdateSidebarSignal",
-                    org_id=channel_serializer.data.get("org_id"),
-                    user_id=result.get("owner"),
-                    room_id=result.get("_id"),
+            if result.__contains__("_id"):
+                loop = asyncio.get_event_loop()
+                loop.create_task(
+                    request_finished.send(
+                        sender=str,
+                        dispatch_uid="UpdateSidebarSignal",
+                        org_id=channel_serializer.data.get("org_id"),
+                        user_id=result.get("owner"),
+                        room_id=result.get("_id"),
+                    )
                 )
-            )
 
-            status_code = status.HTTP_201_CREATED
-            return Custom_Response(
-                serializer.data, status=status_code, request=request, view=self
-            )
+                status_code = status.HTTP_201_CREATED
+                return Custom_Response(
+                    serializer.data, status=status_code, request=request, view=self
+                )
         else:
             return Custom_Response(
-                result, status=status_code, request=request, view=self
+                channel_serializer.errors,
+                status=status_code,
+                request=request,
+                view=self,
             )
 
     @swagger_auto_schema(
@@ -388,7 +391,7 @@ class ChannelViewset(AsycViewMixin, ThrottledViewSet, OrderMixin):
         },
     )
     @action(methods=["GET"], detail=False)
-    async def user_channel_retrieve(self, request, org_id, user_id):
+    async def user_channel_retrieve(self, request, org_id, member_id):
         """Retrieve list of channels a user belongs to
         ```bash
         curl -X GET "{{baseUrl}}/v1/{{org_id}}/channels/users/{{user_id}}/" -H  "accept: application/json"
@@ -412,7 +415,7 @@ class ChannelViewset(AsycViewMixin, ThrottledViewSet, OrderMixin):
                     },
                     list(
                         filter(
-                            lambda item: user_id in item.get("users", {}).keys(),
+                            lambda item: member_id in item.get("users", {}).keys(),
                             response,
                         )
                     ),
@@ -580,7 +583,7 @@ def dms_test(request):
         else:
             core_server = "Inactive"
 
-    except Exception:
+    except Exception:  # noqa
         core_server = "Inactive"
     return render(
         request, "dms_test.html", {"dms_server": dms_server, "core_server": core_server}

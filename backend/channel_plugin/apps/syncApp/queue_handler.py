@@ -1,7 +1,14 @@
 import asyncio
+from asyncio.tasks import gather
 from django.conf import settings
 from aiohttp import ClientSession
+import aiohttp
 import json
+import requests
+from requests.sessions import session
+import threading
+
+timeout = aiohttp.ClientTimeout(60*2)
 
 
 # def _():
@@ -31,7 +38,16 @@ dummy_queue_data = [
             "organization_id":"1"
         }
     },
+    {
+        "id": 50,
+        "event": "enter_organization",
+        "message": {
+            "member_id":"testuser",
+            "organization_id":"1"
+        }
+    },
 ]
+
 
 class QueueHandler:
 
@@ -60,7 +76,6 @@ class QueueHandler:
         for handler in handlers:
             try:
                 schema = handler.get_schema()
-                
                 assert isinstance(schema, dict), f"handler.get_schema() returned a {type(schema)} instead of dict"
                 assert isinstance(schema.get("event"), str), f"schema event must be of type string"
 
@@ -78,10 +93,12 @@ class QueueHandler:
       
     async def __run_task(self, task_handler, task_data):
         compeleted = False
-        
+        self.__task_queue.remove(task_data)
+        print("RUNING A TASK")
         try:
-            compeleted = task_handler.run(task_data)
+            compeleted = await task_handler.run(task_data)
         except Exception as exc:
+            print(exc)
             pass
         
         if compeleted:
@@ -89,7 +106,6 @@ class QueueHandler:
         else:
             self.__unresolved_task.append(task_data)
             
-        self.__task_queue.remove(task_data)
 
     def __update_global_state(self, done=True):
         if done:
@@ -124,7 +140,7 @@ class QueueHandler:
                     self.__task_queue.append(item)
 
     async def _get_queue_data(self):
-        async with ClientSession()  as  session :
+        async with ClientSession(timeout=timeout)  as  session :
             id = settings.PLUGIN_ID
             
             url = f"https://api.zuri.chat/marketplace/plugins/{id}/"
@@ -138,13 +154,12 @@ class QueueHandler:
                 self.update_queue(queue)
 
     async def _process_queue(self):
-        event_loop = asyncio.get_event_loop()
         tasks = []
         
         for task in self._get_queue():
             handler = self._task_handlers.get(task.get("event"))
-
             if handler:
+                print("Gotten handler and sending")
                 tasks.append(self.__run_task(handler, task))
 
         await asyncio.gather(*tasks)
@@ -163,20 +178,20 @@ class QueueHandler:
                 most_recent_task = task
 
         if most_recent_task:
-            async with ClientSession() as session:
-                id = settings.PLUGIN_ID
-                
-                url = f"https://api.zuri.chat/plugins/{id}/sync"
-                
-                res = await session.patch(url, {"id": most_recent_task.get("id", 0)})
-              
-                if res.status == 200:
-                    self.__update_global_state(done=True)
-
+            id = settings.PLUGIN_ID
+            url = f"https://api.zuri.chat/plugins/{id}/sync"
+            res = requests.patch(url, json.dumps({"id": most_recent_task.get("id")}), timeout=60*2)
+            if res.status_code >= 200 or res.status_code < 300:  
+                self.__update_global_state(done=True)
 
     @staticmethod
     def run(handlers):
         queue_handler = QueueHandler.__get_runing_instance(handlers)
-        asyncio.run(queue_handler.__start__())
-
-
+        print("START RUN")
+        try:
+            future = queue_handler.__start__()
+            asyncio.run(future)
+        except (RuntimeError):
+            future = asyncio.ensure_future(queue_handler.__start__())
+        else:
+            print("END RUN")

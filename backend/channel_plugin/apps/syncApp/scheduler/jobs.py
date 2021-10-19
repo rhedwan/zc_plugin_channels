@@ -11,13 +11,8 @@ def job_function():
 
 
 def run_qhandler_schedule(Handler=QHandler, Workers = [JoinTaskHandler]):
-    print(datetime.now().time().strftime('%H:%M:%S'))
+    print("\n\n" +datetime.now().time().strftime('%H:%M:%S'))
     Handler.run(Workers)
     print("\n\nDone")
 
-def my_listener(event):
-    if event.exception:
-        print('The job crashed :(')
-    else:
-        print('The job worked :)')
 
